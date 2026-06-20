@@ -1,46 +1,41 @@
 import asyncio
 import logging
 import os
-
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.types import Message
 from aiogram.filters import Command
 
-# --- НАСТРОЙКИ (их нужно будет поменять) ---
-# Токен твоего бота от @BotFather
-BOT_TOKEN = "BOT_TOKEN"
-# Твой личный ID в Telegram (узнай у @userinfobot)
-ADMIN_ID = ADMIN_ID  # Это число, без кавычек
-# -------------------------------------------
+# --- БЕЗОПАСНОЕ ПОЛУЧЕНИЕ ПЕРЕМЕННЫХ ИЗ ОКРУЖЕНИЯ ---
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+ADMIN_ID = int(os.environ.get("ADMIN_ID", 0))
 
-# Включаем логирование, чтобы видеть ошибки
+# Проверка: если токен не задан — бот не запустится
+if not BOT_TOKEN:
+    raise ValueError("❌ BOT_TOKEN не задан! Добавь переменную окружения BOT_TOKEN.")
+if ADMIN_ID == 0:
+    raise ValueError("❌ ADMIN_ID не задан! Добавь переменную окружения ADMIN_ID.")
+# ----------------------------------------------------
+
 logging.basicConfig(level=logging.INFO)
-
-# Создаем объекты бота и диспетчера
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 # Хранилище для связи: ID пользователя -> ID его последнего сообщения админу
-# Нужно, чтобы отвечать в правильный диалог
 user_last_message_id = {}
 
-# Обработчик команды /start
 @dp.message(Command("start"))
-async def cmd_start(message: Message):
+async def cmd_start(message: types.Message):
     await message.answer(
         "👋 Привет! Это бот поддержки NotLegal RP.\n\n"
         "Напиши мне свой вопрос, и я передам его нашей команде. "
         "Мы постараемся ответить как можно быстрее!"
     )
 
-# Этот обработчик ловит ВСЕ сообщения от пользователей
 @dp.message()
-async def handle_user_message(message: Message):
+async def handle_user_message(message: types.Message):
     user_id = message.from_user.id
     user_name = message.from_user.full_name
     username = f"@{message.from_user.username}" if message.from_user.username else "без юзернейма"
 
-    # Формируем сообщение для админа
     admin_text = (
         f"✉️ **Новое сообщение от пользователя**\n"
         f"👤 Имя: {user_name}\n"
@@ -51,34 +46,25 @@ async def handle_user_message(message: Message):
     )
 
     try:
-        # Пытаемся отправить админу копию сообщения пользователя
         if message.text:
             sent_msg = await bot.send_message(chat_id=ADMIN_ID, text=admin_text, parse_mode="Markdown")
         elif message.photo:
-            # Если пользователь прислал фото, пересылаем его
             sent_msg = await bot.send_photo(chat_id=ADMIN_ID, photo=message.photo[-1].file_id, caption=admin_text)
         elif message.voice:
             sent_msg = await bot.send_voice(chat_id=ADMIN_ID, voice=message.voice.file_id, caption=admin_text)
         else:
-            # Для других типов (документы, видео и т.д.) просто пересылаем
             sent_msg = await bot.forward_message(chat_id=ADMIN_ID, from_chat_id=user_id, message_id=message.message_id)
 
-        # Запоминаем, какое сообщение отправили админу, чтобы потом ответить пользователю
         user_last_message_id[user_id] = sent_msg.message_id
-
-        # Подтверждаем пользователю, что его сообщение получено
         await message.answer("✅ Твоё сообщение отправлено в поддержку. Мы свяжемся с тобой в ближайшее время!")
 
     except Exception as e:
         logging.error(f"Ошибка при пересылке сообщения от {user_id}: {e}")
-        await message.answer("❌ Произошла ошибка. Пожалуйста, попробуй ещё раз позже.")
+        await message.answer("❌ Произошла ошибка. Попробуй ещё раз позже.")
 
-# Этот обработчик ловит ответы от тебя (админа) на пересланные сообщения
 @dp.message(F.reply_to_message)
-async def handle_admin_reply(message: Message):
-    # Проверяем, что сообщение, на которое отвечают, было отправлено ботом
+async def handle_admin_reply(message: types.Message):
     if message.reply_to_message.from_user.id == bot.id:
-        # Ищем, для какого пользователя было это сообщение
         target_user_id = None
         for uid, mid in user_last_message_id.items():
             if mid == message.reply_to_message.message_id:
@@ -87,7 +73,6 @@ async def handle_admin_reply(message: Message):
 
         if target_user_id:
             try:
-                # Отправляем ответ пользователю
                 await bot.send_message(chat_id=target_user_id, text=f"💬 **Ответ от поддержки:**\n{message.text}")
                 await message.answer("✅ Ответ отправлен пользователю.")
             except Exception as e:
@@ -98,7 +83,6 @@ async def handle_admin_reply(message: Message):
     else:
         await message.answer("ℹ️ Чтобы ответить пользователю, используй функцию 'Ответить' на его сообщении.")
 
-# Запуск бота
 async def main():
     await dp.start_polling(bot)
 
