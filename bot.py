@@ -22,7 +22,10 @@ from aiogram.types import (
 BOT_TOKEN = os.getenv("NL_TG_KEY", "").strip()
 ADMIN_CHAT_ID_RAW = os.getenv("NL_ADMIN_CHAT_ID", "").strip()
 DB_PATH = os.getenv("NL_DB_PATH", "notlegal_bot.db").strip() or "notlegal_bot.db"
+
 FORM_URL = os.getenv("NL_FORM_URL", "").strip()
+MEDIA_FORM_URL = os.getenv("NL_MEDIA_FORM_URL", "").strip() or FORM_URL
+TEAM_FORM_URL = os.getenv("NL_TEAM_FORM_URL", "").strip() or FORM_URL
 
 if not BOT_TOKEN:
     raise RuntimeError("NL_TG_KEY не задан в переменных окружения")
@@ -71,29 +74,31 @@ def main_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="Подать заявку")],
-            [KeyboardButton(text="Статус заявки"), KeyboardButton(text="Помощь")],
+            [KeyboardButton(text="Медиа / стример"), KeyboardButton(text="Команда проекта")],
+            [KeyboardButton(text="Помощь")],
         ],
         resize_keyboard=True,
         input_field_placeholder="Выбери действие или напиши сообщение",
     )
 
 
-def apply_keyboard() -> InlineKeyboardMarkup | None:
-    if not FORM_URL:
+def url_keyboard(text: str, url: str) -> InlineKeyboardMarkup | None:
+    if not url:
         return None
 
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="Открыть форму заявки", url=FORM_URL)]
+            [InlineKeyboardButton(text=text, url=url)]
         ]
     )
 
 
 async def set_bot_commands():
     await bot.set_my_commands([
-        BotCommand(command="start", description="Начать работу с ботом"),
-        BotCommand(command="apply", description="Подать заявку в Лигу"),
-        BotCommand(command="status", description="Узнать статус заявки"),
+        BotCommand(command="start", description="Главное меню NotLegal RP"),
+        BotCommand(command="apply", description="Подать заявку в команду проекта"),
+        BotCommand(command="media", description="Заявка для медиа и стримеров"),
+        BotCommand(command="team", description="Заявка в команду проекта"),
         BotCommand(command="help", description="Помощь и контакты"),
     ])
 
@@ -208,6 +213,9 @@ def make_user_info_text(message: Message) -> str:
 async def notify_admin_about_user_message(message: Message):
     user = message.from_user
 
+    if not user:
+        return
+
     await save_user(
         user_id=user.id,
         username=user.username,
@@ -291,10 +299,11 @@ async def cmd_start(message: Message):
 
     await message.answer(
         "<b>NotLegal RP</b>\n\n"
-        "Привет. Здесь можно подать заявку, узнать статус или написать команде проекта\n\n"
+        "Привет. Здесь можно подать заявку в проект, связаться с командой или отправить сообщение по сотрудничеству\n\n"
         "Команды:\n"
         "/apply - подать заявку\n"
-        "/status - узнать статус заявки\n"
+        "/media - медиа и стримеры\n"
+        "/team - команда проекта\n"
         "/help - помощь и контакты",
         reply_markup=main_keyboard(),
     )
@@ -307,7 +316,7 @@ async def cmd_apply(message: Message):
         await message.answer(
             "<b>Заявка в NotLegal RP</b>\n\n"
             "Заполни форму по кнопке ниже. После отправки заявка попадёт команде проекта",
-            reply_markup=apply_keyboard(),
+            reply_markup=url_keyboard("Открыть форму заявки", FORM_URL),
         )
         return
 
@@ -320,16 +329,48 @@ async def cmd_apply(message: Message):
     )
 
 
-@dp.message(Command("status"))
-@dp.message(F.text == "Статус заявки")
-async def cmd_status(message: Message):
+@dp.message(Command("media"))
+@dp.message(F.text == "Медиа / стример")
+async def cmd_media(message: Message):
+    if MEDIA_FORM_URL:
+        await message.answer(
+            "<b>Заявка для медиа и стримеров NotLegal RP</b>\n\n"
+            "Если хочешь снимать контент, стримить, делать Shorts/TikTok или обсудить рекламу, заполни форму по кнопке ниже\n\n"
+            "Команда посмотрит заявку и ответит тебе здесь или свяжется по указанным контактам",
+            reply_markup=url_keyboard("Открыть форму для медиа", MEDIA_FORM_URL),
+        )
+        return
+
     await message.answer(
-        "<b>Статус заявки</b>\n\n"
-        "Если ты уже отправил заявку, напиши сюда:\n"
-        "1. свой Telegram или Discord\n"
-        "2. никнейм\n"
-        "3. направление заявки\n\n"
-        "Команда проверит заявку и ответит тебе в этом чате"
+        "<b>Заявка для медиа и стримеров NotLegal RP</b>\n\n"
+        "Напиши сюда:\n"
+        "1. где ты снимаешь или стримишь\n"
+        "2. ссылку на канал\n"
+        "3. средние просмотры или онлайн\n"
+        "4. что хочешь предложить проекту\n\n"
+        "Команда получит сообщение и ответит тебе здесь"
+    )
+
+
+@dp.message(Command("team"))
+@dp.message(F.text == "Команда проекта")
+async def cmd_team(message: Message):
+    if TEAM_FORM_URL:
+        await message.answer(
+            "<b>Заявка в команду NotLegal RP</b>\n\n"
+            "Если хочешь попасть в администрацию, PR, SMM, ивенты, дизайн, монтаж или другое направление, заполни форму по кнопке ниже",
+            reply_markup=url_keyboard("Открыть форму в команду", TEAM_FORM_URL),
+        )
+        return
+
+    await message.answer(
+        "<b>Заявка в команду NotLegal RP</b>\n\n"
+        "Напиши сюда:\n"
+        "1. направление\n"
+        "2. опыт\n"
+        "3. сколько времени готов уделять\n"
+        "4. Telegram или Discord для связи\n\n"
+        "Команда получит сообщение и ответит тебе здесь"
     )
 
 
@@ -340,9 +381,20 @@ async def cmd_help(message: Message):
         "<b>Помощь NotLegal RP</b>\n\n"
         "/start - главное меню\n"
         "/apply - подать заявку\n"
-        "/status - узнать статус заявки\n"
-        "/help - помощь\n\n"
+        "/media - медиа и стримеры\n"
+        "/team - команда проекта\n"
+        "/help - помощь и контакты\n\n"
         "Также можешь просто написать сообщение в этот чат. Команда проекта получит его и ответит здесь"
+    )
+
+
+@dp.message(Command("status"))
+@dp.message(F.text == "Статус заявки")
+async def cmd_status(message: Message):
+    await message.answer(
+        "<b>Статус заявки</b>\n\n"
+        "Если ты уже отправил заявку, напиши сюда Telegram или Discord, никнейм и направление заявки\n\n"
+        "Команда проверит и ответит тебе в этом чате"
     )
 
 
@@ -368,7 +420,9 @@ async def cmd_health(message: Message):
         f"Bot ID: <code>{me.id}</code>\n"
         f"Admin chat ID: <code>{ADMIN_CHAT_ID}</code>\n"
         f"DB: <code>{html.escape(DB_PATH)}</code>\n"
-        f"Form URL: <code>{html.escape(FORM_URL or 'not set')}</code>"
+        f"Form URL: <code>{html.escape(FORM_URL or 'not set')}</code>\n"
+        f"Media form URL: <code>{html.escape(MEDIA_FORM_URL or 'not set')}</code>\n"
+        f"Team form URL: <code>{html.escape(TEAM_FORM_URL or 'not set')}</code>"
     )
 
 
@@ -379,7 +433,8 @@ async def handle_unknown_command(message: Message):
         "Доступные команды:\n"
         "/start\n"
         "/apply\n"
-        "/status\n"
+        "/media\n"
+        "/team\n"
         "/help"
     )
 
