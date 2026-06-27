@@ -2,7 +2,7 @@ import asyncio
 import html
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import aiosqlite
 from aiogram import Bot, Dispatcher, F
@@ -66,6 +66,18 @@ bot = Bot(
 dp = Dispatcher()
 
 
+TEMPLATE_COMMANDS = {
+    "call",
+    "missing",
+    "accept_stream",
+    "accept_media",
+    "accept_team",
+    "reject",
+    "remind",
+    "close_no_answer",
+}
+
+
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -91,6 +103,23 @@ def url_keyboard(text: str, url: str) -> InlineKeyboardMarkup | None:
             [InlineKeyboardButton(text=text, url=url)]
         ]
     )
+
+
+def get_command_name(message: Message) -> str:
+    if not message.text:
+        return ""
+
+    raw_command = message.text.split(maxsplit=1)[0].lower()
+    raw_command = raw_command.lstrip("/")
+    return raw_command.split("@", 1)[0]
+
+
+def get_command_args(message: Message) -> str:
+    if not message.text:
+        return ""
+
+    parts = message.text.split(maxsplit=1)
+    return parts[1].strip() if len(parts) > 1 else ""
 
 
 async def set_bot_commands():
@@ -193,6 +222,49 @@ async def mark_answered(admin_message_id: int):
         await db.commit()
 
 
+async def get_bot_stats() -> dict:
+    day_ago = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        users_cursor = await db.execute("SELECT COUNT(*) FROM users")
+        users_count = (await users_cursor.fetchone())[0]
+
+        messages_cursor = await db.execute("""
+            SELECT COUNT(DISTINCT user_id || ':' || COALESCE(user_message_id, 0))
+            FROM message_links
+        """)
+        messages_count = (await messages_cursor.fetchone())[0]
+
+        recent_cursor = await db.execute("""
+            SELECT COUNT(DISTINCT user_id || ':' || COALESCE(user_message_id, 0))
+            FROM message_links
+            WHERE created_at >= ?
+        """, (day_ago,))
+        recent_messages_count = (await recent_cursor.fetchone())[0]
+
+        open_cursor = await db.execute("""
+            SELECT COUNT(*)
+            FROM message_links
+            WHERE status = 'open'
+        """)
+        open_links_count = (await open_cursor.fetchone())[0]
+
+        answered_cursor = await db.execute("""
+            SELECT COUNT(*)
+            FROM message_links
+            WHERE status = 'answered'
+        """)
+        answered_links_count = (await answered_cursor.fetchone())[0]
+
+    return {
+        "users_count": users_count,
+        "messages_count": messages_count,
+        "recent_messages_count": recent_messages_count,
+        "open_links_count": open_links_count,
+        "answered_links_count": answered_links_count,
+    }
+
+
 def make_user_info_text(message: Message) -> str:
     user = message.from_user
 
@@ -206,7 +278,8 @@ def make_user_info_text(message: Message) -> str:
         f"<b>Username:</b> {username}\n"
         "────────────────────\n"
         "Ответь на это сообщение через функцию <b>Ответить</b>, "
-        "и бот отправит ответ пользователю"
+        "и бот отправит ответ пользователю\n\n"
+        "Шаблоны для ответа: <code>/tpl</code>"
     )
 
 
@@ -247,8 +320,175 @@ async def notify_admin_about_user_message(message: Message):
     )
 
 
+def build_template_text(command: str, args: str) -> tuple[str | None, str | None]:
+    safe_args = html.escape(args)
+
+    if command == "call":
+        if not args:
+            return None, "Укажи время после команды, например: <code>/call завтра в 19:00 МСК</code>"
+
+        return (
+            "Заявка выглядит интересно, хотим коротко пообщаться голосом\n\n"
+            f"Сможешь выйти на созвон {safe_args}? Обсудим опыт, направление и что можно делать в NotLegal RP",
+            None,
+        )
+
+    if command == "missing":
+        return (
+            "Посмотрели заявку, но не хватает данных для решения\n\n"
+            "Пришли, пожалуйста:\n"
+            "1. ссылку на канал / портфолио / прошлый проект\n"
+            "2. сколько времени готов уделять NotLegal RP\n"
+            "3. какой формат работы тебе интересен\n\n"
+            "После этого сможем нормально рассмотреть заявку",
+            None,
+        )
+
+    if command == "accept_stream":
+        return (
+            "Мы посмотрели заявку и готовы взять тебя в Стримерскую Лигу NotLegal RP\n\n"
+            "Следующий шаг: добавляем тебя в рабочий Discord, выдаём роль и даём первые задачи по контенту\n\n"
+            "Для старта нужно:\n"
+            "1. ознакомиться с правилами стримерской программы\n"
+            "2. согласовать первый стрим или первый контент\n"
+            "3. держать связь с куратором",
+            None,
+        )
+
+    if command == "accept_media":
+        return (
+            "Заявка подходит, готовы взять тебя в медиа-направление NotLegal RP\n\n"
+            "Для старта добавим тебя в рабочий Discord, выдадим роль и дадим первый тестовый план по контенту\n\n"
+            "Первый фокус: короткие ролики, клипы, ситуации с сервера и материалы, которые помогут привести новых игроков",
+            None,
+        )
+
+    if command == "accept_team":
+        role = safe_args or "выбранное направление"
+
+        return (
+            f"Мы рассмотрели заявку и готовы взять тебя в команду NotLegal RP на направление: {role}\n\n"
+            "Следующий шаг: добавляем тебя в рабочий Discord, выдаём роль, знакомим с регламентом и даём первое тестовое задание\n\n"
+            "После тестового задания поймём, в какой зоне ты будешь полезнее всего",
+            None,
+        )
+
+    if command == "reject":
+        return (
+            "Спасибо за заявку в NotLegal RP\n\n"
+            "Сейчас мы не готовы взять тебя в это направление. Причина не в том, что заявка плохая, просто на текущем этапе нам нужен немного другой опыт и формат участия\n\n"
+            "Ты можешь следить за новостями проекта, развивать опыт и подать заявку позже повторно",
+            None,
+        )
+
+    if command == "remind":
+        return (
+            "Напоминаю по заявке в NotLegal RP\n\n"
+            "Мы готовы продолжить рассмотрение, но ждём от тебя ответ / недостающие данные\n\n"
+            "Если заявка ещё актуальна, напиши сюда сегодня или завтра",
+            None,
+        )
+
+    if command == "close_no_answer":
+        return (
+            "Так как ответа по заявке не было, мы пока закрываем её\n\n"
+            "Если желание присоединиться к NotLegal RP останется, можешь подать заявку повторно через форму",
+            None,
+        )
+
+    return None, "Неизвестный шаблон. Список шаблонов: <code>/tpl</code>"
+
+
+async def send_template_reply(message: Message, command: str, args: str):
+    if not message.reply_to_message:
+        await message.answer(
+            "Эту команду нужно отправлять ответом на сообщение кандидата\n\n"
+            "Нажми на сообщение бота с заявкой → Ответить → напиши команду"
+        )
+        return
+
+    reply_to_message_id = message.reply_to_message.message_id
+    target_user_id = await get_user_by_admin_message(reply_to_message_id)
+
+    if not target_user_id:
+        await message.answer(
+            "Не нашёл пользователя для этого сообщения\n\n"
+            "Возможно, это старое сообщение или ответ был не на сообщение бота"
+        )
+        return
+
+    template_text, error_text = build_template_text(command, args)
+
+    if error_text:
+        await message.answer(error_text)
+        return
+
+    try:
+        await bot.send_message(
+            chat_id=target_user_id,
+            text=(
+                "<b>Ответ команды NotLegal RP:</b>\n\n"
+                f"{template_text}"
+            ),
+        )
+
+        await mark_answered(reply_to_message_id)
+        await message.answer("Шаблон отправлен пользователю")
+
+    except Exception as e:
+        logger.exception("Ошибка при отправке шаблона пользователю: %s", e)
+        await message.answer("Не удалось отправить шаблон пользователю. Смотри логи")
+
+
+@dp.message(F.chat.id == ADMIN_CHAT_ID, Command("tpl"))
+async def cmd_templates(message: Message):
+    await message.answer(
+        "<b>Шаблоны ответов NotLegal RP</b>\n\n"
+        "Используй команды ответом на сообщение кандидата:\n\n"
+        "<code>/call завтра в 19:00 МСК</code> — пригласить на созвон\n"
+        "<code>/missing</code> — запросить недостающие данные\n"
+        "<code>/accept_stream</code> — принять в Стримерскую Лигу\n"
+        "<code>/accept_media</code> — принять в медиа\n"
+        "<code>/accept_team PR/SMM</code> — принять в команду на направление\n"
+        "<code>/reject</code> — мягкий отказ\n"
+        "<code>/remind</code> — напомнить кандидату\n"
+        "<code>/close_no_answer</code> — закрыть, если не ответил\n\n"
+        "Важно: сначала нажми <b>Ответить</b> на сообщение бота с заявкой, потом отправь команду"
+    )
+
+
+@dp.message(F.chat.id == ADMIN_CHAT_ID, Command("stats"))
+async def cmd_stats(message: Message):
+    stats = await get_bot_stats()
+
+    await message.answer(
+        "<b>Статистика бота NotLegal RP</b>\n\n"
+        f"Пользователей в базе: <b>{stats['users_count']}</b>\n"
+        f"Сообщений от пользователей: <b>{stats['messages_count']}</b>\n"
+        f"Сообщений за 24 часа: <b>{stats['recent_messages_count']}</b>\n"
+        f"Открытых связок сообщений: <b>{stats['open_links_count']}</b>\n"
+        f"Отвеченных связок сообщений: <b>{stats['answered_links_count']}</b>\n\n"
+        "Заявки из Google Form считай по таблице. Эта статистика показывает сообщения, прошедшие через Telegram-бота"
+    )
+
+
+@dp.message(F.chat.id == ADMIN_CHAT_ID, Command(*TEMPLATE_COMMANDS))
+async def handle_admin_template_command(message: Message):
+    command = get_command_name(message)
+    args = get_command_args(message)
+    await send_template_reply(message, command, args)
+
+
 @dp.message(F.chat.id == ADMIN_CHAT_ID, F.reply_to_message)
 async def handle_admin_reply(message: Message):
+    if message.text and message.text.startswith("/"):
+        await message.answer(
+            "Команду не отправил пользователю\n\n"
+            "Если хотел использовать шаблон, проверь список: <code>/tpl</code>\n"
+            "Если хотел отправить обычный текст, убери символ / в начале"
+        )
+        return
+
     reply_to_message_id = message.reply_to_message.message_id
     target_user_id = await get_user_by_admin_message(reply_to_message_id)
 
@@ -293,7 +533,11 @@ async def cmd_start(message: Message):
     if message.chat.id == ADMIN_CHAT_ID:
         await message.answer(
             "Бот NotLegal RP работает\n\n"
-            "Когда пользователь напишет боту, сообщение придёт сюда"
+            "Когда пользователь напишет боту, сообщение придёт сюда\n\n"
+            "Админ-команды:\n"
+            "/tpl — шаблоны ответов\n"
+            "/stats — статистика сообщений\n"
+            "/health — проверка бота"
         )
         return
 
@@ -428,6 +672,22 @@ async def cmd_health(message: Message):
 
 @dp.message(F.text.startswith("/"))
 async def handle_unknown_command(message: Message):
+    if message.chat.id == ADMIN_CHAT_ID:
+        await message.answer(
+            "Такой админ-команды нет\n\n"
+            "Админ-команды:\n"
+            "/tpl\n"
+            "/stats\n"
+            "/health\n\n"
+            "Команды для кандидатов:\n"
+            "/start\n"
+            "/apply\n"
+            "/media\n"
+            "/team\n"
+            "/help"
+        )
+        return
+
     await message.answer(
         "Такой команды нет\n\n"
         "Доступные команды:\n"
