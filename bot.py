@@ -9,63 +9,44 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandStart
-from aiogram.types import Message
+from aiogram.types import (
+    BotCommand,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    Message,
+    ReplyKeyboardMarkup,
+)
 
-
-# =========================
-# ENV
-# =========================
 
 BOT_TOKEN = os.getenv("NL_TG_KEY", "").strip()
 ADMIN_CHAT_ID_RAW = os.getenv("NL_ADMIN_CHAT_ID", "").strip()
 DB_PATH = os.getenv("NL_DB_PATH", "notlegal_bot.db").strip() or "notlegal_bot.db"
+FORM_URL = os.getenv("NL_FORM_URL", "").strip()
 
 if not BOT_TOKEN:
-    raise RuntimeError(
-        "NL_TG_KEY не задан в переменных окружения. "
-        "На Bothost добавь переменную NL_TG_KEY и вставь туда только токен от BotFather."
-    )
+    raise RuntimeError("NL_TG_KEY не задан в переменных окружения")
 
 if BOT_TOKEN.startswith("bot"):
-    raise RuntimeError(
-        "NL_TG_KEY нужно вставлять без префикса 'bot'. "
-        "Нужен только сам токен от BotFather."
-    )
+    raise RuntimeError("NL_TG_KEY нужно вставлять без префикса bot")
 
 if "api.telegram.org" in BOT_TOKEN:
-    raise RuntimeError(
-        "В NL_TG_KEY вставлена ссылка, а нужен только токен от BotFather."
-    )
+    raise RuntimeError("В NL_TG_KEY вставлена ссылка, а нужен только токен")
 
 if "/" in BOT_TOKEN:
-    raise RuntimeError(
-        "В NL_TG_KEY есть лишний символ '/'. "
-        "Вставь только токен, без ссылки и без метода /getMe."
-    )
+    raise RuntimeError("В NL_TG_KEY есть лишний символ /")
 
 if ":" not in BOT_TOKEN:
-    raise RuntimeError(
-        "NL_TG_KEY выглядит неверно: в токене Telegram должен быть символ ':'."
-    )
+    raise RuntimeError("NL_TG_KEY выглядит неверно")
 
 if not ADMIN_CHAT_ID_RAW:
-    raise RuntimeError(
-        "NL_ADMIN_CHAT_ID не задан в переменных окружения. "
-        "Вставь туда свой Telegram ID или ID админ-группы."
-    )
+    raise RuntimeError("NL_ADMIN_CHAT_ID не задан в переменных окружения")
 
 try:
     ADMIN_CHAT_ID = int(ADMIN_CHAT_ID_RAW)
 except ValueError:
-    raise RuntimeError(
-        "NL_ADMIN_CHAT_ID должен быть числом. "
-        "Для лички это обычный Telegram ID, для группы обычно начинается с -100."
-    )
+    raise RuntimeError("NL_ADMIN_CHAT_ID должен быть числом")
 
-
-# =========================
-# LOGGING
-# =========================
 
 logging.basicConfig(
     level=logging.INFO,
@@ -73,11 +54,6 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger("notlegal-bot")
-
-
-# =========================
-# BOT
-# =========================
 
 bot = Bot(
     token=BOT_TOKEN,
@@ -87,12 +63,39 @@ bot = Bot(
 dp = Dispatcher()
 
 
-# =========================
-# DATABASE
-# =========================
-
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def main_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Подать заявку")],
+            [KeyboardButton(text="Статус заявки"), KeyboardButton(text="Помощь")],
+        ],
+        resize_keyboard=True,
+        input_field_placeholder="Выбери действие или напиши сообщение",
+    )
+
+
+def apply_keyboard() -> InlineKeyboardMarkup | None:
+    if not FORM_URL:
+        return None
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Открыть форму заявки", url=FORM_URL)]
+        ]
+    )
+
+
+async def set_bot_commands():
+    await bot.set_my_commands([
+        BotCommand(command="start", description="Начать работу с ботом"),
+        BotCommand(command="apply", description="Подать заявку в Лигу"),
+        BotCommand(command="status", description="Узнать статус заявки"),
+        BotCommand(command="help", description="Помощь и контакты"),
+    ])
 
 
 async def init_db():
@@ -155,7 +158,7 @@ async def save_message_link(admin_message_id: int, user_id: int, user_message_id
             admin_message_id,
             user_id,
             user_message_id,
-            utc_now_iso()
+            utc_now_iso(),
         ))
 
         await db.commit()
@@ -185,10 +188,6 @@ async def mark_answered(admin_message_id: int):
         await db.commit()
 
 
-# =========================
-# HELPERS
-# =========================
-
 def make_user_info_text(message: Message) -> str:
     user = message.from_user
 
@@ -196,10 +195,10 @@ def make_user_info_text(message: Message) -> str:
     username = f"@{html.escape(user.username)}" if user.username else "без username"
 
     return (
-        "✉️ <b>Новое сообщение в поддержку Not Legal RP</b>\n\n"
-        f"👤 <b>Имя:</b> {full_name}\n"
-        f"🆔 <b>ID:</b> <code>{user.id}</code>\n"
-        f"🔗 <b>Username:</b> {username}\n"
+        "<b>Новое сообщение в поддержку NotLegal RP</b>\n\n"
+        f"<b>Имя:</b> {full_name}\n"
+        f"<b>ID:</b> <code>{user.id}</code>\n"
+        f"<b>Username:</b> {username}\n"
         "────────────────────\n"
         "Ответь на это сообщение через функцию <b>Ответить</b>, "
         "и бот отправит ответ пользователю"
@@ -226,37 +225,28 @@ async def notify_admin_about_user_message(message: Message):
         user_message_id=message.message_id,
     )
 
-    try:
-        copied = await bot.copy_message(
-            chat_id=ADMIN_CHAT_ID,
-            from_chat_id=message.chat.id,
-            message_id=message.message_id,
-            reply_to_message_id=header.message_id,
-        )
+    copied = await bot.copy_message(
+        chat_id=ADMIN_CHAT_ID,
+        from_chat_id=message.chat.id,
+        message_id=message.message_id,
+        reply_to_message_id=header.message_id,
+    )
 
-        await save_message_link(
-            admin_message_id=copied.message_id,
-            user_id=user.id,
-            user_message_id=message.message_id,
-        )
+    await save_message_link(
+        admin_message_id=copied.message_id,
+        user_id=user.id,
+        user_message_id=message.message_id,
+    )
 
-    except Exception as e:
-        logger.exception("Не удалось скопировать сообщение пользователя админу: %s", e)
-
-
-# =========================
-# HANDLERS
-# =========================
 
 @dp.message(F.chat.id == ADMIN_CHAT_ID, F.reply_to_message)
 async def handle_admin_reply(message: Message):
     reply_to_message_id = message.reply_to_message.message_id
-
     target_user_id = await get_user_by_admin_message(reply_to_message_id)
 
     if not target_user_id:
         await message.answer(
-            "⚠️ Не нашёл пользователя для этого сообщения\n\n"
+            "Не нашёл пользователя для этого сообщения\n\n"
             "Возможно, это старое сообщение или ответ был не на сообщение бота"
         )
         return
@@ -266,14 +256,14 @@ async def handle_admin_reply(message: Message):
             await bot.send_message(
                 chat_id=target_user_id,
                 text=(
-                    "💬 <b>Ответ поддержки Not Legal RP:</b>\n\n"
+                    "<b>Ответ поддержки NotLegal RP:</b>\n\n"
                     f"{html.escape(message.text)}"
-                )
+                ),
             )
         else:
             await bot.send_message(
                 chat_id=target_user_id,
-                text="💬 <b>Ответ поддержки Not Legal RP:</b>"
+                text="<b>Ответ поддержки NotLegal RP:</b>",
             )
 
             await bot.copy_message(
@@ -283,32 +273,83 @@ async def handle_admin_reply(message: Message):
             )
 
         await mark_answered(reply_to_message_id)
-        await message.answer("✅ Ответ отправлен пользователю")
+        await message.answer("Ответ отправлен пользователю")
 
     except Exception as e:
         logger.exception("Ошибка при отправке ответа пользователю: %s", e)
-        await message.answer("❌ Не удалось отправить ответ пользователю. Смотри логи")
+        await message.answer("Не удалось отправить ответ пользователю. Смотри логи")
 
 
 @dp.message(CommandStart())
 async def cmd_start(message: Message):
     if message.chat.id == ADMIN_CHAT_ID:
         await message.answer(
-            "✅ Бот Not Legal RP работает\n\n"
-            "Когда пользователь напишет боту, заявка придёт сюда"
+            "Бот NotLegal RP работает\n\n"
+            "Когда пользователь напишет боту, сообщение придёт сюда"
         )
         return
 
     await message.answer(
-        "👋 Привет! Это бот поддержки Not Legal RP\n\n"
-        "Напиши сюда свой вопрос, заявку или предложение — команда проекта получит сообщение и ответит тебе"
+        "<b>NotLegal RP</b>\n\n"
+        "Привет. Здесь можно подать заявку, узнать статус или написать команде проекта\n\n"
+        "Команды:\n"
+        "/apply - подать заявку\n"
+        "/status - узнать статус заявки\n"
+        "/help - помощь и контакты",
+        reply_markup=main_keyboard(),
+    )
+
+
+@dp.message(Command("apply"))
+@dp.message(F.text == "Подать заявку")
+async def cmd_apply(message: Message):
+    if FORM_URL:
+        await message.answer(
+            "<b>Заявка в NotLegal RP</b>\n\n"
+            "Заполни форму по кнопке ниже. После отправки заявка попадёт команде проекта",
+            reply_markup=apply_keyboard(),
+        )
+        return
+
+    await message.answer(
+        "<b>Заявка в NotLegal RP</b>\n\n"
+        "Форма заявки пока не подключена к боту\n\n"
+        "Напиши сюда, куда хочешь подать заявку: медиа, стример, PR, SMM, администрация, "
+        "ивентер, дизайнер, лидер или другое направление\n\n"
+        "Команда проекта получит сообщение и ответит тебе здесь"
+    )
+
+
+@dp.message(Command("status"))
+@dp.message(F.text == "Статус заявки")
+async def cmd_status(message: Message):
+    await message.answer(
+        "<b>Статус заявки</b>\n\n"
+        "Если ты уже отправил заявку, напиши сюда:\n"
+        "1. свой Telegram или Discord\n"
+        "2. никнейм\n"
+        "3. направление заявки\n\n"
+        "Команда проверит заявку и ответит тебе в этом чате"
+    )
+
+
+@dp.message(Command("help"))
+@dp.message(F.text == "Помощь")
+async def cmd_help(message: Message):
+    await message.answer(
+        "<b>Помощь NotLegal RP</b>\n\n"
+        "/start - главное меню\n"
+        "/apply - подать заявку\n"
+        "/status - узнать статус заявки\n"
+        "/help - помощь\n\n"
+        "Также можешь просто написать сообщение в этот чат. Команда проекта получит его и ответит здесь"
     )
 
 
 @dp.message(Command("id"))
 async def cmd_id(message: Message):
     await message.answer(
-        "🆔 <b>Информация о чате</b>\n\n"
+        "<b>Информация о чате</b>\n\n"
         f"chat_id: <code>{message.chat.id}</code>\n"
         f"user_id: <code>{message.from_user.id}</code>"
     )
@@ -322,11 +363,24 @@ async def cmd_health(message: Message):
     me = await bot.get_me()
 
     await message.answer(
-        "✅ <b>Health check OK</b>\n\n"
-        f"🤖 Бот: @{me.username}\n"
-        f"🆔 Bot ID: <code>{me.id}</code>\n"
-        f"💬 Admin chat ID: <code>{ADMIN_CHAT_ID}</code>\n"
-        f"🗄 DB: <code>{html.escape(DB_PATH)}</code>"
+        "<b>Health check OK</b>\n\n"
+        f"Бот: @{me.username}\n"
+        f"Bot ID: <code>{me.id}</code>\n"
+        f"Admin chat ID: <code>{ADMIN_CHAT_ID}</code>\n"
+        f"DB: <code>{html.escape(DB_PATH)}</code>\n"
+        f"Form URL: <code>{html.escape(FORM_URL or 'not set')}</code>"
+    )
+
+
+@dp.message(F.text.startswith("/"))
+async def handle_unknown_command(message: Message):
+    await message.answer(
+        "Такой команды нет\n\n"
+        "Доступные команды:\n"
+        "/start\n"
+        "/apply\n"
+        "/status\n"
+        "/help"
     )
 
 
@@ -339,7 +393,7 @@ async def handle_user_message(message: Message):
         await notify_admin_about_user_message(message)
 
         await message.answer(
-            "✅ Сообщение отправлено команде Not Legal RP\n\n"
+            "Сообщение отправлено команде NotLegal RP\n\n"
             "Мы посмотрим и ответим тебе здесь"
         )
 
@@ -347,18 +401,15 @@ async def handle_user_message(message: Message):
         logger.exception("Ошибка обработки сообщения пользователя: %s", e)
 
         await message.answer(
-            "❌ Не удалось отправить сообщение команде\n"
+            "Не удалось отправить сообщение команде\n"
             "Попробуй ещё раз чуть позже"
         )
 
 
-# =========================
-# STARTUP
-# =========================
-
 async def main():
     try:
         await init_db()
+        await set_bot_commands()
 
         me = await bot.get_me()
         logger.info("Бот запущен: @%s / id=%s", me.username, me.id)
