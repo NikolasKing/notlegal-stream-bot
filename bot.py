@@ -2,7 +2,7 @@ import asyncio
 import html
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 import aiosqlite
 from aiogram import Bot, Dispatcher, F
@@ -16,27 +16,51 @@ from aiogram.types import Message
 # ENV
 # =========================
 
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-ADMIN_CHAT_ID_RAW = os.getenv("ADMIN_CHAT_ID", "").strip()
-DB_PATH = os.getenv("DB_PATH", "notlegal_bot.db")
+BOT_TOKEN = os.getenv("NL_TG_KEY", "").strip()
+ADMIN_CHAT_ID_RAW = os.getenv("NL_ADMIN_CHAT_ID", "").strip()
+DB_PATH = os.getenv("NL_DB_PATH", "notlegal_bot.db").strip() or "notlegal_bot.db"
 
 if not BOT_TOKEN:
-    raise RuntimeError("TELEGRAM_BOT_TOKEN не задан в переменных окружения")
+    raise RuntimeError(
+        "NL_TG_KEY не задан в переменных окружения. "
+        "На Bothost добавь переменную NL_TG_KEY и вставь туда только токен от BotFather."
+    )
 
 if BOT_TOKEN.startswith("bot"):
-    raise RuntimeError("TELEGRAM_BOT_TOKEN нужно вставлять без префикса 'bot'. Только сам токен от BotFather")
+    raise RuntimeError(
+        "NL_TG_KEY нужно вставлять без префикса 'bot'. "
+        "Нужен только сам токен от BotFather."
+    )
 
 if "api.telegram.org" in BOT_TOKEN:
-    raise RuntimeError("В TELEGRAM_BOT_TOKEN вставлен URL, а нужен только токен от BotFather")
+    raise RuntimeError(
+        "В NL_TG_KEY вставлена ссылка, а нужен только токен от BotFather."
+    )
 
 if "/" in BOT_TOKEN:
-    raise RuntimeError("В TELEGRAM_BOT_TOKEN есть лишний символ '/'. Вставь только токен, без ссылки и метода getMe")
+    raise RuntimeError(
+        "В NL_TG_KEY есть лишний символ '/'. "
+        "Вставь только токен, без ссылки и без метода /getMe."
+    )
 
 if ":" not in BOT_TOKEN:
-    raise RuntimeError("TELEGRAM_BOT_TOKEN выглядит неверно: в токене Telegram должен быть символ ':'")
+    raise RuntimeError(
+        "NL_TG_KEY выглядит неверно: в токене Telegram должен быть символ ':'."
+    )
 
 if not ADMIN_CHAT_ID_RAW:
-    raise RuntimeError("ADMIN_CHAT_ID не задан в переменных окружения")
+    raise RuntimeError(
+        "NL_ADMIN_CHAT_ID не задан в переменных окружения. "
+        "Вставь туда свой Telegram ID или ID админ-группы."
+    )
+
+try:
+    ADMIN_CHAT_ID = int(ADMIN_CHAT_ID_RAW)
+except ValueError:
+    raise RuntimeError(
+        "NL_ADMIN_CHAT_ID должен быть числом. "
+        "Для лички это обычный Telegram ID, для группы обычно начинается с -100."
+    )
 
 
 # =========================
@@ -67,6 +91,10 @@ dp = Dispatcher()
 # DATABASE
 # =========================
 
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
@@ -95,7 +123,7 @@ async def init_db():
 
 
 async def save_user(user_id: int, username: str | None, full_name: str):
-    now = datetime.utcnow().isoformat()
+    now = utc_now_iso()
 
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
@@ -127,7 +155,7 @@ async def save_message_link(admin_message_id: int, user_id: int, user_message_id
             admin_message_id,
             user_id,
             user_message_id,
-            datetime.utcnow().isoformat()
+            utc_now_iso()
         ))
 
         await db.commit()
@@ -161,7 +189,7 @@ async def mark_answered(admin_message_id: int):
 # HELPERS
 # =========================
 
-def user_link_text(message: Message) -> str:
+def make_user_info_text(message: Message) -> str:
     user = message.from_user
 
     full_name = html.escape(user.full_name or "Без имени")
@@ -189,7 +217,7 @@ async def notify_admin_about_user_message(message: Message):
 
     header = await bot.send_message(
         chat_id=ADMIN_CHAT_ID,
-        text=user_link_text(message),
+        text=make_user_info_text(message),
     )
 
     await save_message_link(
@@ -237,7 +265,10 @@ async def handle_admin_reply(message: Message):
         if message.text:
             await bot.send_message(
                 chat_id=target_user_id,
-                text=f"💬 <b>Ответ поддержки Not Legal RP:</b>\n\n{html.escape(message.text)}"
+                text=(
+                    "💬 <b>Ответ поддержки Not Legal RP:</b>\n\n"
+                    f"{html.escape(message.text)}"
+                )
             )
         else:
             await bot.send_message(
@@ -271,6 +302,15 @@ async def cmd_start(message: Message):
     await message.answer(
         "👋 Привет! Это бот поддержки Not Legal RP\n\n"
         "Напиши сюда свой вопрос, заявку или предложение — команда проекта получит сообщение и ответит тебе"
+    )
+
+
+@dp.message(Command("id"))
+async def cmd_id(message: Message):
+    await message.answer(
+        "🆔 <b>Информация о чате</b>\n\n"
+        f"chat_id: <code>{message.chat.id}</code>\n"
+        f"user_id: <code>{message.from_user.id}</code>"
     )
 
 
@@ -317,15 +357,17 @@ async def handle_user_message(message: Message):
 # =========================
 
 async def main():
-    await init_db()
+    try:
+        await init_db()
 
-    me = await bot.get_me()
-    logger.info("Бот запущен: @%s / id=%s", me.username, me.id)
+        me = await bot.get_me()
+        logger.info("Бот запущен: @%s / id=%s", me.username, me.id)
 
-    # Важно для long polling: убираем старый webhook, если он когда-то был включён
-    await bot.delete_webhook(drop_pending_updates=True)
+        await bot.delete_webhook(drop_pending_updates=True)
+        await dp.start_polling(bot)
 
-    await dp.start_polling(bot)
+    finally:
+        await bot.session.close()
 
 
 if __name__ == "__main__":
