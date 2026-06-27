@@ -16,8 +16,18 @@ from aiogram.types import Message
 # ENV
 # =========================
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
-ADMIN_CHAT_ID_RAW = os.getenv("ADMIN_CHAT_ID", "").strip()
+BOT_TOKEN = (
+    os.getenv("TELEGRAM_BOT_TOKEN")
+    or os.getenv("BOT_TOKEN")
+    or ""
+).strip()
+
+ADMIN_CHAT_ID_RAW = (
+    os.getenv("ADMIN_CHAT_ID")
+    or os.getenv("ADMIN_ID")
+    or ""
+).strip()
+
 DB_PATH = os.getenv("DB_PATH", "notlegal_bot.db")
 
 if not BOT_TOKEN:
