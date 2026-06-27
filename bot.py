@@ -16,39 +16,27 @@ from aiogram.types import Message
 # ENV
 # =========================
 
-BOT_TOKEN = (
-    os.getenv("TELEGRAM_BOT_TOKEN")
-    or os.getenv("BOT_TOKEN")
-    or ""
-).strip()
-
-ADMIN_CHAT_ID_RAW = (
-    os.getenv("ADMIN_CHAT_ID")
-    or os.getenv("ADMIN_ID")
-    or ""
-).strip()
-
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+ADMIN_CHAT_ID_RAW = os.getenv("ADMIN_CHAT_ID", "").strip()
 DB_PATH = os.getenv("DB_PATH", "notlegal_bot.db")
 
 if not BOT_TOKEN:
-    raise RuntimeError("BOT_TOKEN не задан в переменных окружения")
+    raise RuntimeError("TELEGRAM_BOT_TOKEN не задан в переменных окружения")
 
 if BOT_TOKEN.startswith("bot"):
-    raise RuntimeError("BOT_TOKEN нужно вставлять без префикса 'bot'. Только сам токен от BotFather")
+    raise RuntimeError("TELEGRAM_BOT_TOKEN нужно вставлять без префикса 'bot'. Только сам токен от BotFather")
 
 if "api.telegram.org" in BOT_TOKEN:
-    raise RuntimeError("В BOT_TOKEN вставлен URL, а нужен только токен от BotFather")
+    raise RuntimeError("В TELEGRAM_BOT_TOKEN вставлен URL, а нужен только токен от BotFather")
+
+if "/" in BOT_TOKEN:
+    raise RuntimeError("В TELEGRAM_BOT_TOKEN есть лишний символ '/'. Вставь только токен, без ссылки и метода getMe")
 
 if ":" not in BOT_TOKEN:
-    raise RuntimeError("BOT_TOKEN выглядит неверно: в токене Telegram должен быть символ ':'")
+    raise RuntimeError("TELEGRAM_BOT_TOKEN выглядит неверно: в токене Telegram должен быть символ ':'")
 
 if not ADMIN_CHAT_ID_RAW:
     raise RuntimeError("ADMIN_CHAT_ID не задан в переменных окружения")
-
-try:
-    ADMIN_CHAT_ID = int(ADMIN_CHAT_ID_RAW)
-except ValueError:
-    raise RuntimeError("ADMIN_CHAT_ID должен быть числом. Для группы обычно начинается с -100")
 
 
 # =========================
